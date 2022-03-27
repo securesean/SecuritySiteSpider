@@ -92,8 +92,6 @@ namespace SecuritySiteSpider
             private bool Xss_NoMimeSniffing = false;    // https://www.coalfire.com/the-coalfire-blog/mime-sniffing-in-browsers-and-the-security
 
 
-            // Cookie
-            private bool cookie = false;
 
 
             // CSP
@@ -110,6 +108,14 @@ namespace SecuritySiteSpider
 
 
 
+            // Cookie
+            private bool cookie = false;
+            private bool cookie_httponly = false;
+            private bool cookie_secure = false;     // Will only be honored if this was given over an HTTPS request
+            private bool cookie_domain = false;
+            private bool cookie_strict = false;
+            private bool cookie_lax = false;
+            private bool cookie_none = false;
 
 
 
@@ -119,13 +125,74 @@ namespace SecuritySiteSpider
             {
                 string sumString = "";  // This is dumb. I have no idea why I did it like this. Note: don't code while tired
 
+                // Cookie Security
+                if (cookie)
+                {
+                    sumString += "- ";
+                    if (cookie_httponly)
+                    {
+                        sumString += "The page's javascript will not be able to access the cookie";
+                    }
+                    else
+                    {
+                        sumString += "The page's javascript WILL be able to access the cookie";
+                    }
+
+                    if (cookie_secure)
+                    {
+                        // sumString += "The browser will not leak the cookie over an http connection";
+                    }
+                    else
+                    {
+                        if (csp && !csp_upgrade_insecure_requests)
+                        {
+                            sumString += " and the browser WILL leak the cookie over an http connection";
+                        }
+                        
+                    }
+
+                    if (cookie_domain)
+                    {
+                        
+                        sumString += " and the cookie will always be sent back to the original site and subdomains";
+                    }
+                    sumString += ". ";
+
+                    // Lax is the default
+                    if (!cookie_none && !cookie_strict && !cookie_none)
+                        cookie_lax = true;
+
+                    if (cookie_none)
+                    {
+                        if (!cookie_secure)
+                        {
+                            cookie_lax = true;
+                        }
+                        else
+                        {
+                            // "The browser will not leak the cookie over an http connection" AND... coming from another site will also work
+                            sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here";
+                        }
+                    }
+
+                    if (cookie_strict)
+                    {
+                        sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here";
+                    }
+                    if (cookie_lax)
+                    {
+                        sumString += "The cookie will always be sent back to the original site";
+                    }
+                    sumString += ".\n";
+                }
+
                 // CSP
                 sumString += "- ";
                 sumString += "If this connection is over HTTPS the browser will not load anything over HTTP (Cookies should be safe) ";
                 if (csp)
                 {
                     if (!csp_upgrade_insecure_requests)
-                        sumString += " but if there are any HTTP requests the browser will try to load them over HTTPS. ";
+                        sumString += " but if there are any HTTP requests the browser will load them over HTTPS (or fail trying). ";
                     // if the resource is not available over HTTPS, the upgraded request fails and the resource is not loaded.
                     // cascades into <iframe> documents, ensuring the entire page is protected.
                     if (csp_script_src)
@@ -152,7 +219,7 @@ namespace SecuritySiteSpider
                         }
                     } else
                     {
-                        sumString += "\n\tThe browser will render JavaScript from ANYWHERE";
+                        sumString += "\n\tThe browser will render JavaScript from ANYWHERE on this site";
                     }
 
 
@@ -174,7 +241,7 @@ namespace SecuritySiteSpider
                     }
                     else
                     {
-                        sumString += "\n\tThe browser will load images from ANYWHERE!";
+                        sumString += "\n\tThe browser will load images from ANYWHERE on this site";
                     }
 
 
@@ -223,14 +290,14 @@ namespace SecuritySiteSpider
                     }
                     else
                     {
-                        sumString += "\n\tThe server will process stylesheets from any URL";
+                        sumString += "\n\tThe server will load stylesheets from any URL on this site";
                     }
                 } else
                 { // if there is no Content Security Policy found
                     sumString += "\n- There site has NO Content Security Policy SO...";
-                    sumString += "\n\tThe browser will render JavaScript from ANYWHERE!";
-                    sumString += "\n\tThe browser will load images from ANYWHERE!";
-                    sumString += "\n\tThe server will process stylesheets from any URL!";
+                    sumString += "\n\tThe browser will render JavaScript from ANYWHERE on this site";
+                    sumString += "\n\tThe browser will load images from ANYWHERE on this site";
+                    sumString += "\n\tThe server will load stylesheets from any URL on this site";
                 }
                 sumString += ".\n";
 
@@ -319,22 +386,43 @@ namespace SecuritySiteSpider
             internal void setCookieParam(string value)
             {
                 cookie = true;
-                switch (value.ToLower())
+                string param = value.ToLower();
+                switch (param)
                 {   // TODO: Look up the offical standard instead of just relying on only real world web scrapping 
                     // TODO: Set these values below and the defaults above
-                    case string s when s.StartsWith("path="):
+                    case string s when s.StartsWith("__secure-"):
+                        // If a cookie name has this prefix, it's accepted in a Set-Cookie header only if it's marked with the Secure attribute and
+                        // was sent from a secure origin. This is weaker than the __Host- prefix.
+                        break;
+                    case string s when s.StartsWith("__host-"):
+                        // If a cookie name has this prefix, it's accepted in a Set-Cookie header only if it's also marked with the Secure attribute,
+                        // was sent from a secure origin, does not include a Domain attribute, and has the Path attribute set to /.
+                        // This way, these cookies can be seen as "domain-locked".
+                        break;
+                    case string s when s.StartsWith("path"):
                         break;
                     case string s when s.StartsWith("secure"):
+                        cookie_secure = true;
                         break;
-                    case string s when s.StartsWith("samesite="):
+                    case string s when s.StartsWith("samesite"):
+                        if (param.Contains("none"))
+                            cookie_none = true;
+                        if (param.Contains("lax"))
+                            cookie_lax = true;
+                        if (param.Contains("strict"))
+                            cookie_strict = true;
                         break;
-                    case string s when s.StartsWith("max-age"):
+                    case string s when s.StartsWith("max-age"): 
+                        // TODO: Look for REALLY long lasting cookie's
                         break;
-                    case string s when s.StartsWith("domain="):
+                    case string s when s.StartsWith("domain"):
+                        cookie_domain = true;
                         break;
                     case string s when s.StartsWith("expires"):
                         break;
-                    case string s when s.StartsWith("httponly"):    // Due to backwards compatability, Cookies will also be sent to subdomains, this will prevent that
+                    case string s when s.StartsWith("httponly"):
+                        // Due to backwards compatability, Cookies will also be sent to subdomains, this will prevent that
+                        cookie_httponly = true;
                         break;
                     case string s when s.Trim() == "":
                         break;
