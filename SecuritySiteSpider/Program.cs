@@ -22,6 +22,7 @@ namespace SecuritySiteSpider
          * new/missing/funky stuff (I prefer to see what's the the real world).
          * 
          * ToDo:
+         * - Explain that the lack of a sandbox CSP will mean that a loaded iframe can prompt a download
          * - Print description about the Cookie and it's attributes
          * - Highlight non-standard HTTP Headers allowed in 'Access-Control-Allow-Headers'. A webserver is telling you they allow it... and it's custom so it's probably ripe for abuse
          * - Scrape the page because 
@@ -73,7 +74,7 @@ namespace SecuritySiteSpider
         // This is just a simple data class to contain the default security state
         // as dictated as the headers state. I'm basiclly doing this to codify my 
         // own knowledge. This is not meant for other people
-        class WebSite
+        class SiteSecurityState
         { // ToDo: Change class name to WebSiteSecurityState or something more appropreiate
 
             // HSTS was created to combat SSL Strip: https://www.secplicity.org/2019/11/05/hsts-a-trivial-response-to-sslstrip/#:~:text=HSTS%20tries%20to%20fix%20the,to%20a%20genuine%20HTTP%20website.
@@ -171,24 +172,24 @@ namespace SecuritySiteSpider
                         else
                         {
                             // "The browser will not leak the cookie over an http connection" AND... coming from another site will also work
-                            sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here";
+                            sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here (aka no Cross Site Requests, aka no CSRF)";
                         }
                     }
 
                     if (cookie_strict)
                     {
-                        sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here";
+                        sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here (midigating XSS/Phishing and  Cross Site Requests from sites)";
                     }
                     if (cookie_lax)
                     {
-                        sumString += "The cookie will always be sent back to the original site";
+                        sumString += "The cookie will always be sent back to the original site on initial GET/POST request (so Cross Site Requests are allowed, so if you visit a phishing site, it could make a request to this site)";
                     }
                     sumString += ".\n";
                 }
 
                 // CSP
                 sumString += "- ";
-                sumString += "If this connection is over HTTPS the browser will not load anything over HTTP (Cookies should be safe) ";
+                sumString += "If this connection is over HTTPS the browser will not load anything over HTTP (Cookies should be safe from leaking over an HTTP connection) ";
                 if (csp)
                 {
                     if (!csp_upgrade_insecure_requests)
@@ -763,7 +764,7 @@ namespace SecuritySiteSpider
 
             while (links.Count > 0)
             {
-                ShuffleQueue(links);
+                ShuffleQueue(links); // TODO: disable suffling if reading from a file
                 string site = links.Dequeue();
                 if (visited.Contains(site))
                 {
@@ -772,10 +773,10 @@ namespace SecuritySiteSpider
                 System.Console.WriteLine("Scrapping server headers from " + site);
 
                 WebClient web = new WebClient();
-                string strings = "";
+                string html = "";
                 try
                 {
-                    strings = web.DownloadString(site);
+                    html = web.DownloadString(site);
                 } catch(Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
@@ -783,15 +784,50 @@ namespace SecuritySiteSpider
                     Console.ForegroundColor = ConsoleColor.Gray;
                     continue;
                 }
-
                 visited.Add(site);
+
+
+                // Extract Headers
                 WebHeaderCollection myWebHeaderCollection = web.ResponseHeaders;
-                WebSite page = new WebSite();
+
+                //Normalize them both and add them to the tuple list
+                var pageAttributesOrignial = new List<Tuple<string, string>>();
+                var pageAttributes = new List<Tuple<string, string>>();
+                foreach (string key in myWebHeaderCollection.AllKeys)
+                {
+                    string value = myWebHeaderCollection[key];
+                    pageAttributesOrignial.Add(Tuple.Create(key, value));
+                    pageAttributes.Add(Tuple.Create(key.ToLower(), value.ToLower()));
+                }
+
+
+                // Extract Meta tags
+                // <meta name="keywords" content="HTML, CSS, JavaScript">
+                Regex rx = new Regex("<meta.*name.*=\"(.*)\".*content.*=\"(.*)\">",
+                    RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                MatchCollection matches = rx.Matches(html);
+                foreach (Match match in matches)
+                {
+                    GroupCollection groups = match.Groups;
+                    string key = groups[1].ToString();
+                    string value = groups[2].ToString();
+                    pageAttributesOrignial.Add(Tuple.Create(key, value));
+                    pageAttributes.Add(Tuple.Create(key.ToLower(), value.ToLower()));
+                }
+
+                SiteSecurityState page = new SiteSecurityState();
+
+
+
+                foreach ((string key, string value) in pageAttributes)
+                {
+
+                }
 
                 for (int i = 0; i < myWebHeaderCollection.Count; i++)
                 {
                     // My "Don't print" list
-                    // ToDo: Make this into a swtich case
+                    // ToDo: Make this into a swtich case, list, or something less obnoxious 
                     if (
                         myWebHeaderCollection.GetKey(i).ToLower().Contains("server") ||           // This might be fun 
                         myWebHeaderCollection.GetKey(i).ToLower().Contains("x-client-ip") ||           // This might be fun 
@@ -1041,7 +1077,7 @@ namespace SecuritySiteSpider
                 }
 
                 int counter = 0;
-                foreach (LinkItem link in LinkFinder.Find(strings))
+                foreach (LinkItem link in LinkFinder.Find(html))
                 {
                     string href = link.ToString();
                     //System.Console.WriteLine(href);
