@@ -1,81 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
-using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
-
 
 namespace SecuritySiteSpider
 {
     public static class Program
     {
-        /*
-         * Description:
-         * This is a PoC that spiders websites while analyzing their response headers and describes the webservers security ONLY based on those headers. 
-         * This ignores all privacy related issues such as referrer-policy
-         * This is just something I made because I like spiders and it helps me to learn and rememeber if I codify my knowledge
-         * Note: I build this on what I found on the internet, I didn't look at all of the standards/spec's/RFC's so there's always going to be 
-         * new/missing/funky stuff (I prefer to see what's the the real world).
-         * 
-         * ToDo:
-         * - Explain that the lack of a sandbox CSP will mean that a loaded iframe can prompt a download
-         * - Print description about the Cookie and it's attributes
-         * - Highlight non-standard HTTP Headers allowed in 'Access-Control-Allow-Headers'. A webserver is telling you they allow it... and it's custom so it's probably ripe for abuse
-         * - Scrape the page because 
-         *      the meta HTML tag can contain the Content Security Policy (and probably other things). (though not Content-Security-Policy-Report-Only).
-         *          Ex: <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-         *          https://web.dev/fixing-mixed-content/ says "Policies are combined by taking the intersection of the policies; that is to say, each policy after the first can only further restrict the allowed content, not broaden it."
-         *      crossorigin attribute can be in the script tag - "anonymous" and "use-credentials" (aka cookie)
-         * - Store everything in a Log File
-         * - Create better method to find links
-         * - If given just a path, just discard it
-         * - Load url list from file
-         * - Look at https://developer.mozilla.org/en-US/docs/Glossary/CORS-safelisted_response_header
-         * - Store everything in a 'mark as interesting' feature
-         * - Let me google that for you
-         * - Store everything in a DataBase
-         * - Somehow Trigger the accept cookie
-         * - print non-standard headers: https://en.wikipedia.org/wiki/List_of_HTTP_header_fields
-         * 
-         * Ideas:
-         * - Make a list of setFrameOptions not setting their value, and look up on hackerone
-         * - We could build a web of trust
-         * - Submit every URL to an analzer to see if the domain host content for us (like pastebin, or CDN), and see if VT has anything on it
-         * - wget mirror -> Create a Content-Security-Policy that won't break anything
-         *      Is there an easy way to drive the browser, and get the Console errors?
-         *      Note: SVG images seem to require the 'data:'
-         *      Basics: Xss_NoMimeSniffing, reffer policy set to send no data, 
-         * 
-         * Looks like someone has already done this: 
-         * https://github.com/researchapps/url-headers
-         * https://httpschecker.net/how-it-works#httpsChecker
-         * https://github.com/bramus/mixed-content-scan
-         * 
-         * Interesting security features:
-         * https://www.openstreetmap.org/?mlat=22.4449&amp;mlon=114.0263#map=15/22.4449/114.0263
-         * https://www.mapquest.com/search/results?query=Gas
-         * https://www.washingtonpost.com/
-         * https://medlineplus.gov/
-         * https://fun.chicagotribune.com/game/tca-jumble-daily (XSS-protection set to 0)
-         * https://www.startribune.com/local/ allow-headers & methods & creds
-         * http://www.mozilla.com/ many content-security-policies set
-         * https://www.pinterest.com many content-security-policies set
-         * https://duckduckgo.com/
-         * http://www.usatoday.com/sports/fantasy/football/
-         * https://www.nytimes.com/column/thomas-l-friedman
-         * */
 
         public static bool printDefaultFailures = true;
+        private static bool shuffleFlag = false;
 
         // This is just a simple data class to contain the default security state
         // as dictated as the headers state. I'm basiclly doing this to codify my 
         // own knowledge. This is not meant for other people
         class SiteSecurityState
-        { // ToDo: Change class name to WebSiteSecurityState or something more appropreiate
+        {
 
             // HSTS was created to combat SSL Strip: https://www.secplicity.org/2019/11/05/hsts-a-trivial-response-to-sslstrip/#:~:text=HSTS%20tries%20to%20fix%20the,to%20a%20genuine%20HTTP%20website.
             private bool hsts = false;
@@ -96,8 +38,8 @@ namespace SecuritySiteSpider
 
 
             // CSP
-            private bool csp = false; 
-            private bool csp_upgrade_insecure_requests = false; 
+            private bool csp = false;
+            private bool csp_upgrade_insecure_requests = false;
             private bool csp_img_src = false;
             private List<String> csp_img_src_List = new List<String>();
             private bool csp_script_src = false;
@@ -124,7 +66,7 @@ namespace SecuritySiteSpider
             override
             public string ToString()
             {
-                string sumString = "";  // This is dumb. I have no idea why I did it like this. Note: don't code while tired
+                string sumString = "";  // This is dumb. I have no idea why I did it like this. Note: don't code while sick and tired
 
                 // Cookie Security
                 if (cookie)
@@ -149,12 +91,12 @@ namespace SecuritySiteSpider
                         {
                             sumString += " and the browser WILL leak the cookie over an http connection";
                         }
-                        
+
                     }
 
                     if (cookie_domain)
                     {
-                        
+
                         sumString += " and the cookie will always be sent back to the original site and subdomains";
                     }
                     sumString += ". ";
@@ -169,11 +111,11 @@ namespace SecuritySiteSpider
                         {
                             cookie_lax = true;
                         }
-                        else
-                        {
-                            // "The browser will not leak the cookie over an http connection" AND... coming from another site will also work
-                            sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here (aka no Cross Site Requests, aka no CSRF)";
-                        }
+                        //else... idk I'm confused about this
+                        //{
+                        //    // "The browser will not leak the cookie over an http connection" AND... coming from another site will also work
+                        //    sumString += "The cookie will only be sent back to the original site but NOT when a user clicks a link from another site to here (aka no Cross Site Requests, aka no CSRF)";
+                        //}
                     }
 
                     if (cookie_strict)
@@ -201,10 +143,11 @@ namespace SecuritySiteSpider
                         sumString += "\n\tThe browser will only render JavaScript from: ";
                         foreach (string uri in csp_script_src_List)
                         {
-                            if(uri.ToLower().Trim() == ""   || uri.ToLower().Trim() == "'unsafe-inline'"  || uri.ToLower().Trim() == "'unsafe-eval'")
+                            if (uri.ToLower().Trim() == "" || uri.ToLower().Trim() == "'unsafe-inline'" || uri.ToLower().Trim() == "'unsafe-eval'")
                             {
                                 // Don't print these 
-                            } else
+                            }
+                            else
                             {
                                 sumString += "\n\t\t";
                                 if (uri.ToLower().Trim() == "https:" || uri.ToLower().Trim() == "*")
@@ -212,13 +155,14 @@ namespace SecuritySiteSpider
                                 else
                                     sumString += uri;
                             }
-                            
+
                         }
                         if (!Xss_NoMimeSniffing)
                         {
                             sumString += "\n\t\t" + "The browser also might confuse some html or text for javascript";
                         }
-                    } else
+                    }
+                    else
                     {
                         sumString += "\n\tThe browser will render JavaScript from ANYWHERE on this site";
                     }
@@ -264,8 +208,8 @@ namespace SecuritySiteSpider
                     {
                         sumString += "\n\tThe server will process form POSTing to any URL";
                     }
-                    
-                    
+
+
                     if (csp_style_src)
                     {
                         sumString += "\n\tThe browser will only allow styles loaded from: ";
@@ -293,7 +237,8 @@ namespace SecuritySiteSpider
                     {
                         sumString += "\n\tThe server will load stylesheets from any URL on this site";
                     }
-                } else
+                }
+                else
                 { // if there is no Content Security Policy found
                     sumString += "\n- There site has NO Content Security Policy SO...";
                     sumString += "\n\tThe browser will render JavaScript from ANYWHERE on this site";
@@ -312,8 +257,9 @@ namespace SecuritySiteSpider
                         sumString += " including subdomains";
                     if (hsts_preload)
                         sumString += " and this will eventually happen without that first connection to the server because it's going on the preload list";
-                   
-                } else
+
+                }
+                else
                 {
                     sumString += "This site can be loaded over HTTP (SslStripping is possible if HTTPS exists)";
                 }
@@ -321,10 +267,10 @@ namespace SecuritySiteSpider
 
 
                 // x-frame-options
-                
+
                 if (canBeEmbedded)
                 {
-                    
+
                     if (embeddedList.Count == 1)
                     {
                         if (embeddedList[0].ToLower().Contains("sameorigin"))
@@ -336,17 +282,18 @@ namespace SecuritySiteSpider
                     {
                         sumString += "- ";
                         sumString += "This site can be embedded in an iframe, so phishing/Clickjacking might be possible";
-                        if(embeddedList.Count == 0)
+                        if (embeddedList.Count == 0)
                         {
                             sumString += " from ANYWHERE";
-                        } else
+                        }
+                        else
                         {
                             sumString += " from these sites: ";
                             foreach (string site in embeddedList)
                             {
                                 sumString += " " + site + " ";
                             }
-                            
+
                         }
                         sumString += ".\n";
                     }
@@ -413,7 +360,7 @@ namespace SecuritySiteSpider
                         if (param.Contains("strict"))
                             cookie_strict = true;
                         break;
-                    case string s when s.StartsWith("max-age"): 
+                    case string s when s.StartsWith("max-age"):
                         // TODO: Look for REALLY long lasting cookie's
                         break;
                     case string s when s.StartsWith("domain"):
@@ -429,10 +376,14 @@ namespace SecuritySiteSpider
                         break;
                     default:
                         if (printDefaultFailures)
-                            Console.WriteLine("Non-standard Cookie component: " + value);
+                        {
+                            Console.ForegroundColor = ConsoleColor.Gray;
+                            Console.WriteLine("\t(Non-standard Cookie component)");
+                            Console.ForegroundColor = ConsoleColor.Green;
+                        }
                         break;
                 }
-                
+
             }
 
             internal void setCSPParam(string key, string value)
@@ -454,7 +405,6 @@ namespace SecuritySiteSpider
                         // Deprecated. in favor of report-to
                         break;
                     case string s when s.StartsWith("report-to"):
-                        // Deprecated. in favor of report-to
                         break;
                     case string s when s.StartsWith("frame-ancestors"):
                         break;
@@ -520,7 +470,7 @@ namespace SecuritySiteSpider
                         // Can it be embedded in an iframe
                         setFrameOptions(value);
                         break;
-                    case "x-xss-protection":     
+                    case "x-xss-protection":
                         // This is in the ignore list for now because it's been retired by modern browsers
                         processXssProtection(value);
                         break;
@@ -573,8 +523,13 @@ namespace SecuritySiteSpider
 
 
                     default:
-                        if(printDefaultFailures)
+                        if (printDefaultFailures)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Gray;
                             Console.WriteLine("What is the default value of " + key.ToLower());
+                            Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        }
+                            
                         break;
                 }
             }
@@ -588,12 +543,13 @@ namespace SecuritySiteSpider
 
             private void processMineTypeXssProtection(string value)
             {
-                if (value.ToLower().Contains("nosniff")){
+                if (value.ToLower().Contains("nosniff"))
+                {
                     Xss_NoMimeSniffing = true;
                 }
                 else
                 {
-                    Console.WriteLine("Error: x-content-type-options should only be able to have 'nosniff' and it has: " + value);
+                    Console.WriteLine("\t\tError: x-content-type-options should only be able to have 'nosniff' and it has: " + value);
                 }
             }
             private void processXssProtection(string values)
@@ -628,8 +584,8 @@ namespace SecuritySiteSpider
                     }
 
                 }
-                
-                    
+
+
             }
 
             private void processHSTS(string value)
@@ -650,7 +606,7 @@ namespace SecuritySiteSpider
                         hsts_preload = true;
                     }
                 }
-                
+
 
 
                 //if (hsts)
@@ -675,12 +631,12 @@ namespace SecuritySiteSpider
                     case string s when s.StartsWith("allow-from"):
                         embeddedList.Add(value);
                         break;
-                    case string s when s.Trim() == "": 
+                    case string s when s.Trim() == "":
                         // I don't know how, but some sites just don't supply anything so (Chrome at least) ignores it for now
                         canBeEmbedded = true;
                         break;
                     default:
-                        if(printDefaultFailures)
+                        if (printDefaultFailures)
                             Console.WriteLine("Need to process x-frame-options value: " + value);
                         break;
                 }
@@ -743,41 +699,197 @@ namespace SecuritySiteSpider
 
         static int Main(string[] args)
         {
+            string metaTagFailLog = "MetaTagFail.log";
+            string htmlLogPath = "LastPage.html";
             List<string> visited = new List<string>();
             Queue<string> links = new Queue<string>();
-            //links.Enqueue("https://www.nytimes.com/subscription/dg-cookie-policy/cookie-policy.html");
-            //links.Enqueue("https://www.nytimes.com/column/thomas-l-friedman");
+
+            foreach(string arg in args)
+            {
+                if (arg.ToLower() == "-h" || arg.ToLower() == "--help")
+                {
+                    Console.WriteLine("Only supported arguments are URL's to start the spider and 'shuffle'");
+                    return 0;
+                }
+                else if (arg.ToLower() == "-shuffle" || arg.ToLower() == "-randomize")
+                {
+                    shuffleFlag = true;
+                }
+                else
+                {
+                    if (arg.StartsWith("http://") || arg.StartsWith("https://"))
+                        links.Enqueue(arg);
+                    else
+                    {
+                        links.Enqueue("http://" + arg);
+                        links.Enqueue("https://" + arg);
+                    }
+                }
+            }
+
+            links.Enqueue("https://www.nytimes.com/subscription/dg-cookie-policy/cookie-policy.html");
+            links.Enqueue("https://www.nytimes.com/column/thomas-l-friedman");
             links.Enqueue("https://refdesk.com/");
-            //links.Enqueue("https://sdb.tools/");
-            //links.Enqueue("https://www.openstreetmap.org/?mlat=22.4449&amp;mlon=114.0263#map=15/22.4449/114.0263");
-            //links.Enqueue("https://www.mapquest.com/search/results?query=Gas");
-            //links.Enqueue("https://www.washingtonpost.com/");
-            //links.Enqueue("https://medlineplus.gov/");
-            //links.Enqueue("https://fun.chicagotribune.com/game/tca-jumble-daily");
-            //links.Enqueue("https://www.startribune.com/local/");
-            //links.Enqueue("http://www.mozilla.com/");
-            //links.Enqueue("https://www.pinterest.com");
-            //links.Enqueue("https://duckduckgo.com/");
-            //links.Enqueue("http://www.usatoday.com/sports/fantasy/football/");
+            links.Enqueue("https://sdb.tools/");
+            links.Enqueue("https://www.openstreetmap.org/?mlat=22.4449&amp;mlon=114.0263#map=15/22.4449/114.0263");
+            links.Enqueue("https://www.mapquest.com/search/results?query=Gas");
+            links.Enqueue("https://www.washingtonpost.com/");
+            links.Enqueue("https://medlineplus.gov/");
+            links.Enqueue("https://fun.chicagotribune.com/game/tca-jumble-daily");
+            links.Enqueue("https://www.startribune.com/local/");
+            links.Enqueue("http://www.mozilla.com/");
+            links.Enqueue("https://www.pinterest.com");
+            links.Enqueue("https://duckduckgo.com/");
+            links.Enqueue("http://www.usatoday.com/sports/fantasy/football/");
 
 
+            var securityList = new List<string>
+{
+    "x-frame-options",
+    "strict-transport-security",
+    "permissions-policy",
+    "cross-origin-opener-policy",
+    "cross-origin-resource-policy",
+    "timing-allow-origin",
+    "x-origin-time",
+    "report-to",        // Whenever a user visits a page on your site, their browser sends JSON-formatted reports regarding anything that violates the content security policy to this URL
+    "x-redis",
+    "x-content-type-options",
+
+    // Access Control around the idea of Same Origin Policy (SOP).
+    // Headers that start with, "access-control" are sent back to the browser to tell it what it should* be doing and what it should* have access to across origins (aka sites)
+    // So these headers are designed to tell the browser how to access Cross Origin Resources (for Sharing) aka CORS so these are 'CORS' headers
+    "access-control-allow-credentials",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-allow-origin",  // Access-Control-Allow-Origin response header to tell the browser that the content of this page is accessible to certain origins. https://stackoverflow.com/questions/10636611/how-does-access-control-allow-origin-header-work
+    "content-security-policy",
+    "content-security-policy-report-only",
+    "origin"
+
+};
+
+            var doNotPrintList = new List<string>
+{
+    "server",           // This might be fun 
+    "x-client-ip",           // This might be fun 
+    "x-powered-by",     // this might be fun
+    "x-content-powered-by",     // this might be fun
+    "x-served-by",     // this might be fun
+    "served-by",     // this might be fun
+    "x-servedbyhost",     // this might be fun - ::ffff:127.0.0.1
+    "x-hosted-by",     // this might be fun to map
+    "x-bbackend",     // this might be fun
+    "x-backend",     // this might be fun
+    "x-backend-server",     // this might be fun
+    "x-datacenter",     // this might be fun
+    "x-url",
+    "x-host",
+    "x-pbs-appsvrip",     // Bug: leaking internal IP info found on https://www.pbs.org/newshour/
+    "x-pbs-",
+
+    // Info about me (aka creepy)
+    "x-dbg-gt",
+    "x-true-client-ip",     
+
+    // Proxy Related
+    "x-forwarded-for",     // this might be fun
+    "via",     // this might be fun
+
+    // This might change the sites response format
+    "vary",
+    "x-ua-compatible",     
+
+    // AWS
+    "x-amz-cf-pop",
+    "x-amz-cf-id",
+    "x-amz-version-id",
+    "x-amz-id-2",
+    "x-amz-request-id",
+    "x-amz-meta-uncompressed-size",   
+
+    // Fastly
+    "fastly-original-body-size",      
+
+    // Security related but don't really matter
+    "expect-ct",  // Cert transparency
+
+    // CMS's
+    "x-drupal-cache",  // Cert transparency
+    "wpx",   // I think it's a wordpress site
+
+    // Interesting
+    "nel",   // Network Error Logging (404's and such)
+    "accept-ranges",   // resume downloads from a certain byte offset
+
+    "x-origin-time",
+    "origin-trial",     // washingtonpost.com
+    "x-xss-protection",     // this is on the ignore list because it's been retired by modern browsers
+    "x-permitted-cross-domain-policies",  // used to permit cross-domain requests from Flash and PDF documents
+    "x-download-options",     // just an IE-8 thing
+    "referrer-policy",        // just a privacy thing https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Referrer-Policy 
+    "content-type",
+    "akamai-grn",
+    "x-cdn",
+    "x-route",
+    "x-origin-cache",
+    "x-varnish",
+    "pragma",
+    "x-gt-setter",
+    "x-route-akamai",
+    "x-edge-cache-expiry",
+    "x-edge-cache-duration",
+    "link",   // link to metadata about the site
+    "x-httpd",   // response header information and usage statistics.
+    "transfer-encoding",
+    "x-timer",
+    "x-vcache",
+    "cache-control",
+    "connection",
+    "x-proxy-cache",
+    "x-response-time",
+    "x-cdn-rule",
+    "date",
+    "etag",
+    "age",
+    "x-cache",
+    "fastly-restarts",
+    "upgrade",
+    "x-cache",
+    "status",
+    "keep-alive",
+    "cf-cache-status",
+    "content-length",
+    "content-language",
+    "expires",
+    "x-runtime",
+    "x-rateLimit-reset",
+    "x-ratelimit-limit",
+    "x-rateLimit-remaining",
+    "last-modified",
+
+
+    // Meta tags that I don't care much about
+};
 
             while (links.Count > 0)
             {
-                ShuffleQueue(links); // TODO: disable suffling if reading from a file
+                if(shuffleFlag)
+                    ShuffleQueue(links); 
                 string site = links.Dequeue();
                 if (visited.Contains(site))
                 {
                     continue;
                 }
-                System.Console.WriteLine("Scrapping server headers from " + site);
+                System.Console.WriteLine("Scrapping server headers and meta tags from " + site);
 
                 WebClient web = new WebClient();
                 string html = "";
                 try
                 {
                     html = web.DownloadString(site);
-                } catch(Exception ex)
+                }
+                catch (Exception ex)
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
                     System.Console.WriteLine("Error: " + ex.Message);
@@ -785,7 +897,7 @@ namespace SecuritySiteSpider
                     continue;
                 }
                 visited.Add(site);
-
+                writeToFile(html, htmlLogPath);
 
                 // Extract Headers
                 WebHeaderCollection myWebHeaderCollection = web.ResponseHeaders;
@@ -802,18 +914,64 @@ namespace SecuritySiteSpider
 
 
                 // Extract Meta tags
-                // <meta name="keywords" content="HTML, CSS, JavaScript">
-                Regex rx = new Regex("<meta.*name.*=\"(.*)\".*content.*=\"(.*)\">",
-                    RegexOptions.Compiled | RegexOptions.IgnoreCase);
-                MatchCollection matches = rx.Matches(html);
-                foreach (Match match in matches)
+                // I might need to account for single quotes. See MetaTagFail.log. https://regex101.com/ is REALLY useful
+                Regex allMetatags = new Regex("<meta.*name.*=\"(.*)\".*content.*=\"(.*)\">", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                // Typical tags: <meta http-equiv="x-ua-compatible" content="IE=edge,chrome=1" />
+                Regex securityMetaTags = new Regex("meta.*http-equiv.*=\"(.*)\".*content.*=\"(.*)\".*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                // Tags without content: <meta content="on" http-equiv="x-dns-prefetch-control"/> 
+                Regex securityNoContentMetaTags = new Regex("meta.*http-equiv.*=\"(.*)\".*>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+                foreach (string line in html.Split('\n'))
                 {
-                    GroupCollection groups = match.Groups;
-                    string key = groups[1].ToString();
-                    string value = groups[2].ToString();
-                    pageAttributesOrignial.Add(Tuple.Create(key, value));
-                    pageAttributes.Add(Tuple.Create(key.ToLower(), value.ToLower()));
+                    foreach (string tag in line.Split('<'))
+                    {
+                        bool metaTagFlag = false;
+                        if (tag.Contains("http-equiv"))
+                        {
+                            metaTagFlag = true;
+                            //Console.WriteLine("Should Catch: {0}", line.Trim());
+                        }
+
+                        MatchCollection matches = securityMetaTags.Matches(tag);
+                        foreach (Match match in matches)
+                        {
+                            GroupCollection groups = match.Groups;
+                            string key = groups[1].ToString();
+                            string value = groups[2].ToString();
+                            pageAttributesOrignial.Add(Tuple.Create(key, value));
+                            pageAttributes.Add(Tuple.Create(key.ToLower(), value.ToLower()));
+                            metaTagFlag = false;
+                            if (key.ToLower().Contains("content-security"))
+                            {
+                                Console.WriteLine("\tFound CSP in meta tag: '{0}' = '{1}'", key, value);
+                            }
+                        }
+                        if (metaTagFlag && !tag.StartsWith("!--"))
+                        {
+                            // Try again with a more general, no content regex:
+                            matches = securityNoContentMetaTags.Matches(tag);
+                            foreach (Match match in matches)
+                            {
+                                GroupCollection groups = match.Groups;
+                                string key = groups[1].ToString();
+                                string value = "";
+                                pageAttributesOrignial.Add(Tuple.Create(key, value));
+                                pageAttributes.Add(Tuple.Create(key.ToLower(), value.ToLower()));
+                                metaTagFlag = false;
+                            }
+
+                            // If I still fail to scrape the meta tag, log it and move on
+                            if (metaTagFlag)
+                            {
+                                string message = String.Format("RegEx did not this possible meta tag from site {0}: {1} ", site, line.Trim());
+                                writeToFile(message, metaTagFailLog);
+                            }
+
+                           
+
+                        }
+                    }
                 }
+
 
                 SiteSecurityState page = new SiteSecurityState();
 
@@ -821,260 +979,120 @@ namespace SecuritySiteSpider
 
                 foreach ((string key, string value) in pageAttributes)
                 {
-
-                }
-
-                for (int i = 0; i < myWebHeaderCollection.Count; i++)
-                {
-                    // My "Don't print" list
-                    // ToDo: Make this into a swtich case, list, or something less obnoxious 
-                    if (
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("server") ||           // This might be fun 
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-client-ip") ||           // This might be fun 
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-powered-by") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-content-powered-by") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-served-by") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("served-by") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-servedbyhost") ||     // this might be fun - ::ffff:127.0.0.1
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-hosted-by") ||     // this might be fun to map
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-bbackend") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-backend") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-datacenter") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-url") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-host") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-pbs-appsvrip") ||     // Bug: leaking internal IP info found on https://www.pbs.org/newshour/
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-pbs-") ||
-
-                        // Info about me (aka creepy)
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-dbg-gt") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-true-client-ip") ||     
-
-                        // Proxy Related
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-forwarded-for") ||     // this might be fun
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("via") ||     // this might be fun
-
-                        // This might change the sites response format
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("vary") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-ua-compatible") ||     
-
-                        // CloudFlare
-                        myWebHeaderCollection.GetKey(i).ToLower().StartsWith("cf-") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().StartsWith("x-turbo-charged-by") ||
-
-                        // AWS
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-cf-pop") ||      
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-cf-id") ||      
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-version-id") ||      
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-id-2") ||      
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-request-id") ||      
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-amz-meta-uncompressed-size") ||   
-                        
-                        // Fastly
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("fastly-original-body-size") ||      
-
-                        // Security related but don't really matter
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("expect-ct") ||  // Cert transparency
-
-                        // CMS's
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-drupal-cache") ||  // Cert transparency
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("wpx") ||   // I think it's a wordpress site
-
-                        // Interesting
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("nel") ||   // Network Error Logging (404's and such)
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("accept-ranges") ||   // resume downloads from a certain byte offset
-
-                          // No documentation, don't seem to matter:
-                          // x-gen-mode
-                          // x-hnp-log
-                          // x-ads
-
-
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-origin-time") ||     
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("origin-trial") ||     // washingtonpost.com
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-xss-protection") ||     // this is on the ignore list because it's been retired by modern browsers
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-permitted-cross-domain-policies") ||  // used to permit cross-domain requests from Flash and PDF documents
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-download-options") ||     // just an IE-8 thing
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("referrer-policy") ||        // just a privacy thing https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Referrer-Policy 
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("content-type") ||  
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("akamai-grn") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-cdn") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-route") ||       
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-origin-cache") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-varnish") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("pragma") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-gt-setter") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-route-akamai") ||   
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-edge-cache-expiry") ||   
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-edge-cache-duration") ||   
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("link") ||   // link to metadata about the site
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-httpd") ||   // response header information and usage statistics.
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("transfer-encoding") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-timer") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-vcache") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("cache-control") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("connection") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-proxy-cache") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-response-time") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-cdn-rule") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("date") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("etag") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("age") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-cache") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("fastly-restarts") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("upgrade") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-cache") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("status") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("keep-alive") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("cf-cache-status") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("content-length") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("content-language") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("expires") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-runtime") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-rateLimit-reset") ||
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-ratelimit-limit") ||     
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("x-rateLimit-remaining") ||    
-                        myWebHeaderCollection.GetKey(i).ToLower().Contains("last-modified")
-                        )
+                    if (doNotPrintList.Contains(key))
                     {
                         continue;
                     }
-                    else
-                    {
-                        
-                        if (  // Cookie related: 
-                            myWebHeaderCollection.GetKey(i).ToLower().Contains("cookie") ||
-                            myWebHeaderCollection.GetKey(i).ToLower().Contains("p3p") ||  // Certain browsers require a P3P compact policy for cookies to be sent or received in some cases, including the situation involved in the SUL login check
-                            myWebHeaderCollection.GetKey(i).ToLower().Contains("vary") ||
-                            myWebHeaderCollection.GetKey(i).ToLower().Contains("alt-svc") ||  // alternate service - could be a backup server
-                            myWebHeaderCollection.GetKey(i).ToLower().Contains("x-logged-in")  
-                            )
+                    else if (key.Contains("cookie"))
+                    {   // Cookie Security
+                        Console.ForegroundColor = ConsoleColor.Green;
+
+                        if (key.Contains("vary") && !key.Contains("cookie"))
                         {
-
-                            Console.ForegroundColor = ConsoleColor.Green;
-
-                            if (myWebHeaderCollection.GetKey(i).ToLower().Contains("vary") && !myWebHeaderCollection.Get(i).ToLower().Contains("cookie"))
+                            Console.ForegroundColor = ConsoleColor.Gray;
+                        }
+                        if (key == "set-cookie")
+                        {
+                            Console.WriteLine("\t" + key);
+                            string[] values = value.Split(';');
+                            for (int j = 0; j < values.Length; j++)
                             {
-                                Console.ForegroundColor = ConsoleColor.Gray;
-                            } if (myWebHeaderCollection.GetKey(i).ToLower() == "set-cookie")
-                            {
-                                Console.WriteLine("\t" + myWebHeaderCollection.GetKey(i));
-                                string[] values = myWebHeaderCollection.Get(i).Split(';');
-                                for (int j = 0; j < values.Length; j++)
+                                if (j == 0)
+                                {   // Don't highlight the Cookie's value or try to process it
+                                    Console.ForegroundColor = ConsoleColor.Gray;
+                                    Console.WriteLine("\t\t" + values[j].Trim());
+                                }
+                                else
                                 {
-                                    if(j == 0)
-                                    {   // Don't highlight the Cookie's value or try to process it
-                                        Console.ForegroundColor = ConsoleColor.Gray;    
-                                        Console.WriteLine("\t\t" + values[j].Trim());
+                                    Console.ForegroundColor = ConsoleColor.Green;
+                                    Console.Write("\t\t" + values[j].Trim());
+                                    page.setCookieParam(values[j].Trim());
+                                    Console.WriteLine();
+                                }
+
+                            }
+
+
+                            Console.ForegroundColor = ConsoleColor.Gray;
+                        }
+                        else
+                        {
+                            Console.WriteLine("\t" + key + " = " + value);
+                        }
+                    }// end if cookie 
+                    else if (key == "http-equiv")
+                    {
+                        Console.ForegroundColor = ConsoleColor.Yellow;
+                        Console.WriteLine("\t\t" + value);
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                    }
+                    else if (securityList.Contains(key))
+                    {
+                        Console.ForegroundColor = ConsoleColor.DarkYellow;
+                        if (key.StartsWith("content-security-policy"))
+                        {   // print a new line for each of the values in content-security-policy
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine("\t" + key);
+                            string[] values = value.Split(';');
+                            for (int j = 0; j < values.Length; j++)
+                            {
+                                string policy = values[j].Trim();
+                                string[] policyArray = policy.Split(' ');
+                                string cspKey = policyArray[0];
+                                Console.ForegroundColor = ConsoleColor.White;
+                                if (cspKey.Contains("upgrade-insecure-requests"))
+                                    Console.ForegroundColor = ConsoleColor.Cyan;
+                                if (cspKey.Contains("block-all-mixed-content"))
+                                    Console.ForegroundColor = ConsoleColor.Gray;    // Depecated
+
+                                Console.Write("\t\t" + cspKey);
+
+                                // Break up and isolate the value componentns and highlight them if they are terrible security controls
+                                List<string> list = new List<string>(policyArray);
+                                list.RemoveAt(0);
+                                policyArray = list.ToArray();
+                                foreach (string param in policyArray)
+                                {
+                                    string normalized = param.ToLower().Trim();
+                                    if ( // Red Color dangerous CSP values
+                                        normalized == "'unsafe-inline'" ||
+                                        normalized == "'unsafe-eval'" ||
+                                        normalized == "'strict-dynamic'" ||
+                                        normalized == "*" ||
+                                        normalized == "https:")
+                                    {
+                                        Console.ForegroundColor = ConsoleColor.Red;
+                                        Console.Write(" " + param);
                                     }
                                     else
                                     {
-                                        Console.ForegroundColor = ConsoleColor.Green;
-                                        Console.WriteLine("\t\t" + values[j].Trim());
-                                        page.setCookieParam(values[j].Trim());
-                                    }
-                                        
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine("\t" + myWebHeaderCollection.GetKey(i) + " = " + myWebHeaderCollection.Get(i));
-                            }
-
-                            
-                            Console.ForegroundColor = ConsoleColor.Gray;
-                        }
-                        else if ( // Security related: 
-                          //myWebHeaderCollection.GetKey(i).ToLower().Contains("content-type") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-frame-options") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("strict-transport-security") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("permissions-policy") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("cross-origin-opener-policy") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("cross-origin-resource-policy") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("timing-allow-origin") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-origin-time") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("report-to") ||        // Whenever a user visits a page on your site, their browser sends JSON-formatted reports regarding anything that violates the content security policy to this URL
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-redis") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("x-content-type-options") ||
-
-                          // Access Control around the idea of Same Origin Policy (SOP).
-                          // Headers that start with, "access-control" are sent back to the browser to tell it what it should* be doing and what it should* have access to across origins (aka sites)
-                          // So these headers are designed to tell the browser how to access Cross Origin Resources (for Sharing) aka CORS so these are 'CORS' headers
-                          myWebHeaderCollection.GetKey(i).ToLower().StartsWith("access-control") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("access-control-allow-credentials") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("access-control-allow-methods") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("access-control-allow-headers") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("access-control-allow-origin") ||  // Access-Control-Allow-Origin response header to tell the browser that the content of this page is accessible to certain origins. https://stackoverflow.com/questions/10636611/how-does-access-control-allow-origin-header-work
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("content-security-policy") ||
-                          myWebHeaderCollection.GetKey(i).ToLower().Contains("origin"))
-                        {  // Security related:
-                            Console.ForegroundColor = ConsoleColor.DarkYellow;
-                            if ( myWebHeaderCollection.GetKey(i).ToLower().Contains("content-security-policy") )
-                            {   // print a new line for each of the values in content-security-policy
-                                Console.ForegroundColor = ConsoleColor.Yellow;
-                                Console.WriteLine("\t" + myWebHeaderCollection.GetKey(i));
-                                string[] values = myWebHeaderCollection.Get(i).Split(';');
-                                for(int j = 0; j < values.Length; j++)
-                                {
-                                    string policy = values[j].Trim();
-                                    string[] policyArray = policy.Split(' ');
-                                    string key = policyArray[0];
-                                    Console.ForegroundColor = ConsoleColor.White;
-                                    if (key.Contains("upgrade-insecure-requests"))
                                         Console.ForegroundColor = ConsoleColor.Cyan;
-                                    if (key.Contains("block-all-mixed-content"))
-                                        Console.ForegroundColor = ConsoleColor.Gray;    // Depecated
-                                    
-                                    Console.Write("\t\t" + key) ;
-
-                                    // Break up and isolate the value componentns and highlight them if they are terrible security controls
-                                    List<string> list = new List<string>(policyArray);
-                                    list.RemoveAt(0);
-                                    policyArray = list.ToArray();
-                                    foreach (string param in policyArray)
-                                    {
-                                        string normalized = param.ToLower().Trim();
-                                        if ( // Red Color dangerous CSP values
-                                            normalized == "'unsafe-inline'" ||
-                                            normalized == "'unsafe-eval'" ||
-                                            normalized == "'strict-dynamic'" || 
-                                            normalized == "*" || 
-                                            normalized == "https:")
-                                        {
-                                            Console.ForegroundColor = ConsoleColor.Red;
-                                            Console.Write(" " + param);
-                                        }
-                                        else
-                                        {
-                                            Console.ForegroundColor = ConsoleColor.Cyan;
-                                            Console.Write(" " + param);
-                                        }
+                                        Console.Write(" " + param);
                                     }
-                                    Console.WriteLine();
-                                    string value = string.Join(" ", policyArray);
-                                    page.setCSPParam(key, value);
-
-                                    Console.ForegroundColor = ConsoleColor.Gray;
-
-                                    
                                 }
-                            } 
-                            else
-                            {   // print it yellow without formating
-                                Console.WriteLine("\t" + myWebHeaderCollection.GetKey(i) + " = " + myWebHeaderCollection.Get(i));
-                                page.processGenericSecurityHeader(myWebHeaderCollection.GetKey(i), myWebHeaderCollection.Get(i));
-                            }
-                            Console.ForegroundColor = ConsoleColor.Gray;
-                        }
-                        else  // Everything else
-                        {
-                            Console.WriteLine("\t" + myWebHeaderCollection.GetKey(i).ToLower() + " = " + myWebHeaderCollection.Get(i));
-                        }
+                                Console.WriteLine();
+                                string cspValue = string.Join(" ", policyArray);
+                                page.setCSPParam(cspKey, cspValue);
 
-                        
+                                Console.ForegroundColor = ConsoleColor.Gray;
+                            }
+                        }
+                        else
+                        {   // print it yellow without formating
+                            Console.WriteLine("\t" + key + " = " + value);
+                            page.processGenericSecurityHeader(key, value);
+                        }
                         Console.ForegroundColor = ConsoleColor.Gray;
                     }
+                    else // just print if nothing else
+                    {
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        Console.WriteLine("\t{0} - {1}", key, value);
 
-                }
+                    }
+                } // end new/better for loop
+
+
 
                 int counter = 0;
                 foreach (LinkItem link in LinkFinder.Find(html))
@@ -1099,13 +1117,35 @@ namespace SecuritySiteSpider
 
                 System.Console.WriteLine(page);
                 Console.ForegroundColor = ConsoleColor.Gray;
-                System.Console.WriteLine("Done. Added "+ counter + " sites. Total is " + links.Count + " Press Enter for next");
+                System.Console.WriteLine("Done. Added {0} sites. Total is {1}. Press Enter for next site", counter, links.Count);
                 System.Console.ReadLine();
             } // end while loop
 
 
 
             return 0;
+        }
+
+        private static void writeToFile(string message, string path = @"GeneralRunLog.log")
+        {
+            // This text is added only once to the file.
+            if (!File.Exists(path))
+            {
+                // Create a file to write to.
+                using (StreamWriter sw = File.CreateText(path))
+                {
+                    sw.WriteLine(message);
+                }
+            }
+
+            // This text is always added, making the file longer over time
+            // if it is not deleted.
+            using (StreamWriter sw = File.AppendText(path))
+            {
+                sw.WriteLine(message);
+            }
+
+
         }
 
         public static void ShuffleQueue<T>(this Queue<T> queue)
@@ -1127,33 +1167,3 @@ namespace SecuritySiteSpider
         }
     }
 }
-/*
-
-Interesting:
-
-Scrapping https://www.timeanddate.com/time/map/
-        Via = 1.1 varnish
-Scrapping https://www.theadvocate.com/baton_rouge/opinion/letters/
-        x-loop = 1
-        x-robots-tag = noarchive
-        x-ua-compatible = IE=edge,chrome=1
-        x-tncms = 1.61.5; app8; 0.7s; 8M
-Scrapping https://www.usatoday.com/media/latest/videos/news/
-    Feature-Policy = camera 'none';display-capture 'none';geolocation 'none';microphone 'none';payment 'none';usb 'none';xr-spatial-tracking 'none'
-    Gannett-Cam-Experience-Id = control:8
-Scrapping http://www.xinhuanet.com/english/index.htm
-    EagleId
-Scrapping https://www.nytimes.com/
-    onion-location = https://www.nytimesn7cgmftshazwhfgzm37qxb44r64ytbb2dj3x62d2lljsciiyd.onion/
-    X-API-Version = F-F-VI
-    x-gdpr = 0
-    x-api-version
-Scrapping https://www.houstonchronicle.com/opinion/
-        X-Gen-Mode = full
-Scrapping https://postcalc.usps.com/
-        x-ruleset-version = 1.3
-
-
-What does the starter 'X-' mean?
-
- * */
