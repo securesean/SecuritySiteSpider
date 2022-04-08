@@ -7,6 +7,8 @@ March 2022
 
 ![HighlightedTextOutput](Asssets/screenshot2.jpg)
 
+### [Download here](https://github.com/securesean/SecuritySiteSpider/releases/tag/v1.0)
+
 ## Description:
 This is a PoC that spiders websites and lists security related information based on their response headers & meta tags and describes the site's security only based on that. 
 
